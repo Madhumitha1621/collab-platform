@@ -20,6 +20,9 @@ export function appConfig() {
     databaseUrl: required('DATABASE_URL'),
     jwtSecret: required('JWT_SECRET'),
     jwtExpiresInSeconds: int('JWT_EXPIRES_IN_SECONDS', 86400),
+    /** When set, collaboration, subscriptions and access events fan out across instances via Redis. */
+    redisUrl: process.env.REDIS_URL || undefined,
+    redisPrefix: process.env.REDIS_PREFIX || 'collab',
     collab: {
       enabled: process.env.COLLAB_ENABLED !== 'false',
       port: int('COLLAB_PORT', 1234),
