@@ -9,15 +9,19 @@
    │  Yjs over WS        ── HocuspocusProvider: sync + awareness (cursors, presence)
    ▼
  NestJS process
-   ├─ :4000  Express + Apollo  ── AuthResolver, WorkspacesResolver, DocumentsResolver, /health, /metrics
-   └─ :1234  Hocuspocus server ── CollaborationService (auth hooks, rate limits, revocation)
+   ├─ :4000  Express + Apollo  ── Auth, Workspaces, Documents, Snapshots, Invitations, Activity
+   │                              resolvers; /health, /metrics
+   └─ :1234  Hocuspocus server ── CollaborationService (auth hooks, rate limits, revocation, restore)
                 │
                 ├─ AccessService       (one authorization policy for GraphQL and Yjs)
+                ├─ ActivityService     (durable history + live workspace events)
+                ├─ MailerService       (SMTP, or logged in development)
                 └─ PersistenceService  (update log, snapshots, acknowledgements)
                         │
                         ▼
-                   PostgreSQL (users, sessions, workspaces, workspace_members,
-                               documents, document_updates, document_snapshots)
+                   PostgreSQL (users, sessions, workspaces, workspace_members, documents,
+                               document_updates, document_snapshots, activity_logs,
+                               workspace_invitations)
 
  Optional, when REDIS_URL is set: every instance also connects to Redis
    ├─ @hocuspocus/extension-redis  ── Yjs updates, awareness, stateless messages (per document)
@@ -134,5 +138,55 @@ still checked again on their next reconnect, and the subscriber reconnects autom
 **Health.** `/health` reports `redis: up | down | disabled`. `down` returns 503, so a load balancer
 takes the instance out of rotation.
 
-**Still to do before production scale-out:** load-test reconnect bursts and queue saturation across
-instances, and use sticky sessions or connection draining when deploying.
+**Verified:** the production compose stack was run with `--scale server=2` behind nginx. Clients
+spread across both replicas (both persisted updates) and every client converged. Before a large
+rollout, also load-test queue saturation across instances, and drain connections when deploying.
+
+## Named versions and restore (P1)
+
+`createDocumentSnapshot(label)` flushes pending edits, then compacts the log into a **labelled**
+snapshot. Labelled snapshots survive later compactions, which only delete unlabelled ones.
+
+`restoreDocumentSnapshot` never rewinds history. It:
+
+1. Saves the current state as `Before restoring "<label>"`, so every restore can be undone.
+2. Opens a Hocuspocus *direct connection* to the live document and, in one Yjs transaction, replaces
+   the editor's `Y.XmlFragment` (and any `Y.Text` fields) with clones of the version's content.
+3. Lets that edit flow like any other: connected clients see it at once, it merges with concurrent
+   edits, it is persisted and acknowledged, and Redis relays it to other instances.
+
+## Invitations and notifications (P1)
+
+- `sendWorkspaceInvitation` stores only the **SHA-256 of a random 256-bit token**, emails the link
+  `<WEB_URL>/invite/<token>`, and expires after `INVITATION_TTL_HOURS`. A partial unique index allows
+  only one open invitation per address and workspace. Re-inviting revokes the old link.
+- Accepting requires the token **and** a signed-in account with the invited address. Registration
+  doesn't verify email ownership, so the token is what proves access to the mailbox. The claim is a
+  conditional `UPDATE … WHERE accepted_at IS NULL`, so a link can be used only once even under races.
+- `MailerService` sends through `SMTP_URL` (nodemailer). Without it, development builds log the message
+  and production sends nothing. Email delivery never fails the action that triggered it.
+
+## Activity history (P1)
+
+Every document and membership change goes through `ActivityService.record`. It inserts an
+`activity_logs` row (actor, target user, document, and display-only metadata such as a title or role,
+never document content), then publishes the live `workspaceActivity` event. History and the live feed
+therefore always agree. If writing history fails, the change itself still succeeds and the error is
+logged.
+
+Editing content also updates `documents.updated_at` in the same statement that persists the batch, so
+"last modified" reflects real edits, not just renames.
+
+## Search (P1)
+
+`searchDocuments` does a case-insensitive `ILIKE` on titles, joined to the caller's memberships, so
+results can only include documents the user can open. User input is escaped (`%`, `_` and `\` match
+literally), and prefix matches rank first. An index on `(workspace_id, lower(title))` supports
+per-workspace searches. Full-text search over document content is out of scope: content lives as
+binary Yjs state.
+
+## Deployment and performance
+
+See [DEPLOYMENT.md](DEPLOYMENT.md) for the Docker images, the nginx single-origin proxy, TLS,
+scaling, monitoring, and backup/restore procedures. Measured numbers against the PRD targets are in
+[PERFORMANCE.md](PERFORMANCE.md).
