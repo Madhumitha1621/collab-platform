@@ -2,6 +2,7 @@ import { Controller, Get, Header, HttpCode, HttpStatus, Res } from '@nestjs/comm
 import type { Response } from 'express';
 import { DataSource } from 'typeorm';
 import { CollaborationService } from '../collaboration/collaboration.service';
+import { EventsService } from '../events/events.service';
 import { PersistenceService } from '../persistence/persistence.service';
 
 @Controller()
@@ -10,6 +11,7 @@ export class HealthController {
     private readonly dataSource: DataSource,
     private readonly collaboration: CollaborationService,
     private readonly persistence: PersistenceService,
+    private readonly events: EventsService,
   ) {}
 
   @Get('health')
@@ -18,10 +20,12 @@ export class HealthController {
       .query('SELECT 1')
       .then(() => 'up' as const)
       .catch(() => 'down' as const);
-    if (database === 'down') res.status(HttpStatus.SERVICE_UNAVAILABLE);
+    const redis = this.events.redisStatus;
+    if (database === 'down' || redis === 'down') res.status(HttpStatus.SERVICE_UNAVAILABLE);
     return {
-      status: database === 'up' ? 'ok' : 'degraded',
+      status: database === 'up' && redis !== 'down' ? 'ok' : 'degraded',
       database,
+      redis,
       collaboration: {
         documents: this.collaboration.documentsCount,
         connections: this.collaboration.connectionsCount,
