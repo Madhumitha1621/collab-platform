@@ -16,5 +16,18 @@ services:
       timeout: 3s
       retries: 20
 
+  # Cross-instance fan-out (Yjs updates, awareness, subscriptions, access events). Not a
+  # durability layer: PostgreSQL stays the source of truth, so no persistence is configured.
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 2s
+      timeout: 3s
+      retries: 20
+
 volumes:
   pgdata:
