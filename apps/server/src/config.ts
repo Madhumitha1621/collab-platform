@@ -34,6 +34,14 @@ export function appConfig() {
       maxRetries: int('PERSIST_MAX_RETRIES', 5),
       snapshotThreshold: int('SNAPSHOT_UPDATE_THRESHOLD', 200),
     },
+    /** Public URL of the web app, used for links in emails. */
+    webUrl: (process.env.WEB_URL || 'http://localhost:5173').replace(/\/+$/, ''),
+    mail: {
+      /** e.g. smtps://user:pass@smtp.example.com:465. Unset: emails are logged (dev only). */
+      smtpUrl: process.env.SMTP_URL || undefined,
+      from: process.env.MAIL_FROM || 'Collab <no-reply@collab.local>',
+    },
+    invitationTtlHours: int('INVITATION_TTL_HOURS', 168),
   };
 }
 
