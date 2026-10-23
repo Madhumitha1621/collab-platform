@@ -1,13 +1,14 @@
 import { UseGuards } from '@nestjs/common';
-import { Args, Field, ID, InputType, Mutation, Parent, Query, ResolveField, Resolver, Subscription } from '@nestjs/graphql';
-import { IsOptional, IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { Args, Field, ID, InputType, Int, Mutation, Parent, Query, ResolveField, Resolver, Subscription } from '@nestjs/graphql';
+import { IsString, IsUUID, MaxLength, MinLength } from 'class-validator';
+import { InjectRepository } from '@nestjs/typeorm';
+import { Repository } from 'typeorm';
 import { CurrentUser } from '../auth/current-user.decorator';
 import { GqlAuthGuard } from '../auth/gql-auth.guard';
 import type { AuthUser, GqlContext } from '../common/gql-context';
 import { Role } from '../common/roles';
 import { EventsService } from '../events/events.service';
-import { DocumentSnapshot } from '../persistence/document-snapshot.entity';
-import { PersistenceService } from '../persistence/persistence.service';
+import { Workspace } from '../workspaces/workspace.entity';
 import { AccessService } from '../workspaces/access.service';
 import { Document } from './document.entity';
 import { DocumentsService } from './documents.service';
@@ -38,27 +39,14 @@ export class RenameDocumentInput {
   title: string;
 }
 
-@InputType()
-export class CreateDocumentSnapshotInput {
-  @Field(() => ID)
-  @IsUUID()
-  documentId: string;
-
-  @Field({ nullable: true })
-  @IsOptional()
-  @IsString()
-  @MaxLength(200)
-  label?: string;
-}
-
 @Resolver(() => Document)
 @UseGuards(GqlAuthGuard)
 export class DocumentsResolver {
   constructor(
     private readonly documentsService: DocumentsService,
     private readonly access: AccessService,
-    private readonly persistence: PersistenceService,
     private readonly events: EventsService,
+    @InjectRepository(Workspace) private readonly workspaces: Repository<Workspace>,
   ) {}
 
   @Query(() => [Document])
@@ -70,6 +58,16 @@ export class DocumentsResolver {
     return this.documentsService.list(user.id, workspaceId, includeArchived);
   }
 
+  @Query(() => [Document], { description: 'Title search across your workspaces (or one workspace); prefix matches first.' })
+  searchDocuments(
+    @CurrentUser() user: AuthUser,
+    @Args('query') query: string,
+    @Args('workspaceId', { type: () => ID, nullable: true }) workspaceId?: string,
+    @Args('limit', { type: () => Int, defaultValue: 20 }) limit?: number,
+  ) {
+    return this.documentsService.search(user.id, query, { workspaceId, limit });
+  }
+
   @Query(() => Document)
   document(@CurrentUser() user: AuthUser, @Args('id', { type: () => ID }) id: string) {
     return this.documentsService.get(user.id, id);
@@ -78,6 +76,11 @@ export class DocumentsResolver {
   @ResolveField(() => Role)
   async myRole(@Parent() document: Document, @CurrentUser() user: AuthUser) {
     return (await this.access.requireDocument(user.id, document.id, Role.VIEWER, { allowArchived: true })).role;
+  }
+
+  @ResolveField(() => String)
+  async workspaceName(@Parent() document: Document): Promise<string> {
+    return (await this.workspaces.findOneBy({ id: document.workspaceId }))?.name ?? '';
   }
 
   @Mutation(() => Document)
@@ -93,12 +96,6 @@ export class DocumentsResolver {
   @Mutation(() => Document)
   archiveDocument(@CurrentUser() user: AuthUser, @Args('id', { type: () => ID }) id: string) {
     return this.documentsService.archive(user.id, id);
-  }
-
-  @Mutation(() => DocumentSnapshot)
-  async createDocumentSnapshot(@CurrentUser() user: AuthUser, @Args('input') input: CreateDocumentSnapshotInput) {
-    await this.access.requireDocument(user.id, input.documentId, Role.EDITOR);
-    return this.persistence.createSnapshot(input.documentId, { label: input.label ?? null, createdBy: user.id });
   }
 
   @Subscription(() => Document, {
