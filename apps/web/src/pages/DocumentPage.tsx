@@ -265,7 +265,15 @@ function Toolbar({ editor }: { editor: Editor }) {
   });
   const chain = () => editor.chain().focus();
   const button = (label: string, active: boolean, run: () => void, disabled = false) => (
-    <button type="button" className={active ? 'tool active' : 'tool'} aria-pressed={active} onClick={run} disabled={disabled}>
+    <button
+      type="button"
+      className={active ? 'tool active' : 'tool'}
+      aria-pressed={active}
+      // Keep focus (and the selection) in the editor so the next keystroke isn't lost.
+      onMouseDown={(e) => e.preventDefault()}
+      onClick={run}
+      disabled={disabled}
+    >
       {label}
     </button>
   );
