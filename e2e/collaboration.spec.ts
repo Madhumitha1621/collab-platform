@@ -29,9 +29,11 @@ test('two people edit the same document live, with formatting, cursors and prese
   await expect.poll(() => listItems(benEditor)).toEqual(['Ship real-time editing']);
 
   // Ben adds to the same list while Ada is still in it.
-  // Ada moves to the heading so her caret widget isn't inside the line Ben's keystrokes navigate.
+  // Ada's caret widget must not sit in the line Ben's keystrokes navigate. She moves to the heading;
+  // in headless Linux Chrome her editor may instead blur (only one page has focus), which hides it.
   await ada.keyboard.press('Control+Home');
-  await expect(benEditor.locator('h1 .collaboration-carets__label')).toHaveText('Ada Owner');
+  await ben.bringToFront();
+  await expect(benEditor.locator('ul .collaboration-carets__label')).toHaveCount(0);
   // Keyboard, not a mouse click: a click can land on a caret label and misplace the cursor.
   // Ctrl+End reaches the editor's trailing empty paragraph; ArrowUp + End moves to the end of the list item.
   await benEditor.focus();
