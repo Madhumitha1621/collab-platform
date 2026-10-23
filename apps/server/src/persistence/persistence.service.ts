@@ -1,5 +1,5 @@
 import { Injectable, Logger, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
-import { DataSource, EntityManager } from 'typeorm';
+import { DataSource, EntityManager, IsNull, Not } from 'typeorm';
 import * as Y from 'yjs';
 import { appConfig } from '../config';
 import { DocumentSnapshot } from './document-snapshot.entity';
@@ -105,6 +105,19 @@ export class PersistenceService implements OnModuleInit, OnApplicationShutdown {
     });
   }
 
+  /** Labelled snapshots (named versions) of a document, newest first. */
+  listNamedSnapshots(documentId: string): Promise<DocumentSnapshot[]> {
+    return this.dataSource.getRepository(DocumentSnapshot).find({
+      where: { documentId, label: Not(IsNull()) },
+      order: { createdAt: 'DESC' },
+      select: ['id', 'documentId', 'label', 'createdAt', 'createdBy', 'lastAppliedUpdateId'],
+    });
+  }
+
+  findSnapshot(snapshotId: string): Promise<DocumentSnapshot | null> {
+    return this.dataSource.getRepository(DocumentSnapshot).findOne({ where: { id: snapshotId } });
+  }
+
   private serialize<T>(documentId: string, task: () => Promise<T>): Promise<T> {
     const previous = this.chains.get(documentId) ?? Promise.resolve();
     const run = previous.catch(() => undefined).then(task);
@@ -151,11 +164,16 @@ export class PersistenceService implements OnModuleInit, OnApplicationShutdown {
     }
   }
 
-  /** Inserts one merged update and returns how many un-compacted updates the document now has. */
+  /**
+   * Inserts one merged update, marks the document as modified, and returns how many
+   * un-compacted updates the document now has.
+   */
   private async insertUpdate(documentId: string, update: Uint8Array): Promise<number> {
     const rows: Array<{ count: string }> = await this.dataSource.query(
       `WITH inserted AS (
          INSERT INTO document_updates (document_id, update_data) VALUES ($1, $2) RETURNING id
+       ), touched AS (
+         UPDATE documents SET updated_at = now() WHERE id = $1
        )
        SELECT (SELECT count(*) FROM document_updates WHERE document_id = $1) + 1 AS count`,
       [documentId, Buffer.from(update)],
