@@ -2,6 +2,24 @@
 # THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
 # ------------------------------------------------------
 
+type ActivityEntry {
+  actorId: ID
+  actorName: String
+  createdAt: DateTime!
+
+  """Role, email, previous title or snapshot label"""
+  detail: String
+  documentId: ID
+
+  """Document title at the time of the change"""
+  documentTitle: String
+  id: ID!
+  targetUserId: ID
+  targetUserName: String
+  type: WorkspaceEventType!
+  workspaceId: ID!
+}
+
 type AuthPayload {
   token: String!
   user: User!
@@ -35,14 +53,30 @@ type Document {
   title: String!
   updatedAt: DateTime!
   workspaceId: ID!
+  workspaceName: String!
 }
 
 type DocumentSnapshot {
   createdAt: DateTime!
   createdBy: ID
+  createdByName: String
   documentId: ID!
   id: ID!
   label: String
+}
+
+type InvitationPreview {
+  createdAt: DateTime!
+  email: String!
+  expiresAt: DateTime!
+  id: ID!
+  invitedByName: String!
+  role: Role!
+
+  """PENDING, ACCEPTED, REVOKED or EXPIRED"""
+  status: String!
+  workspaceId: ID!
+  workspaceName: String!
 }
 
 input InviteWorkspaceMemberInput {
@@ -63,8 +97,11 @@ type Me {
 }
 
 type Mutation {
+  acceptWorkspaceInvitation(token: String!): Workspace!
   archiveDocument(id: ID!): Document!
   createDocument(input: CreateDocumentInput!): Document!
+
+  """Saves the current content as a named version."""
   createDocumentSnapshot(input: CreateDocumentSnapshotInput!): DocumentSnapshot!
   createWorkspace(input: CreateWorkspaceInput!): Workspace!
   inviteWorkspaceMember(input: InviteWorkspaceMemberInput!): WorkspaceMember!
@@ -73,16 +110,39 @@ type Mutation {
   register(input: RegisterInput!): AuthPayload!
   removeWorkspaceMember(input: RemoveWorkspaceMemberInput!): Boolean!
   renameDocument(input: RenameDocumentInput!): Document!
+
+  """
+  Restores a named version as a new edit. The content before the restore is saved first as its own version, so a restore can be undone.
+  """
+  restoreDocumentSnapshot(snapshotId: ID!): DocumentSnapshot!
+  revokeWorkspaceInvitation(id: ID!): Boolean!
+
+  """Emails an invitation link. Re-inviting replaces the previous link."""
+  sendWorkspaceInvitation(input: SendWorkspaceInvitationInput!): WorkspaceInvitation!
   updateMemberRole(input: UpdateMemberRoleInput!): WorkspaceMember!
   updateWorkspace(input: UpdateWorkspaceInput!): Workspace!
 }
 
 type Query {
+  """Newest first. Pass the last id as `before` to page back."""
+  activityLog(before: ID, limit: Int! = 30, workspaceId: ID!): [ActivityEntry!]!
   document(id: ID!): Document!
+
+  """Named versions of a document, newest first."""
+  documentSnapshots(documentId: ID!): [DocumentSnapshot!]!
   documents(includeArchived: Boolean! = false, workspaceId: ID!): [Document!]!
+  invitation(token: String!): InvitationPreview!
   me: Me!
   myWorkspaces: [Workspace!]!
+
+  """
+  Title search across your workspaces (or one workspace); prefix matches first.
+  """
+  searchDocuments(limit: Int! = 20, query: String!, workspaceId: ID): [Document!]!
   workspace(id: ID!): Workspace!
+
+  """Open invitations of a workspace (owners only)."""
+  workspaceInvitations(workspaceId: ID!): [WorkspaceInvitation!]!
 }
 
 input RegisterInput {
@@ -105,6 +165,12 @@ enum Role {
   EDITOR
   OWNER
   VIEWER
+}
+
+input SendWorkspaceInvitationInput {
+  email: String!
+  role: Role!
+  workspaceId: ID!
 }
 
 type Subscription {
@@ -153,10 +219,27 @@ enum WorkspaceEventType {
   DOCUMENT_ARCHIVED
   DOCUMENT_CREATED
   DOCUMENT_RENAMED
+  INVITATION_ACCEPTED
+  INVITATION_REVOKED
+  INVITATION_SENT
   MEMBER_ADDED
   MEMBER_REMOVED
   MEMBER_ROLE_UPDATED
+  SNAPSHOT_CREATED
+  SNAPSHOT_RESTORED
   WORKSPACE_UPDATED
+}
+
+type WorkspaceInvitation {
+  createdAt: DateTime!
+  email: String!
+  expiresAt: DateTime!
+  id: ID!
+  role: Role!
+
+  """PENDING, ACCEPTED, REVOKED or EXPIRED"""
+  status: String!
+  workspaceId: ID!
 }
 
 type WorkspaceMember {

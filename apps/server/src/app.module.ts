@@ -6,6 +6,8 @@ import { JwtModule } from '@nestjs/jwt';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { GraphQLFormattedError } from 'graphql';
 import { join } from 'node:path';
+import { ActivityResolver } from './activity/activity.resolver';
+import { ActivityService } from './activity/activity.service';
 import { AuthResolver } from './auth/auth.resolver';
 import { AuthService } from './auth/auth.service';
 import { bearerToken } from './auth/gql-auth.guard';
@@ -16,8 +18,12 @@ import { dataSourceOptions } from './database/data-source';
 import { ENTITIES } from './database/entities';
 import { DocumentsResolver } from './documents/documents.resolver';
 import { DocumentsService } from './documents/documents.service';
+import { SnapshotsResolver } from './documents/snapshots.resolver';
 import { EventsService } from './events/events.service';
 import { HealthController } from './health/health.controller';
+import { InvitationsResolver } from './invitations/invitations.resolver';
+import { InvitationsService } from './invitations/invitations.service';
+import { MailerService } from './mail/mailer.service';
 import { PersistenceService } from './persistence/persistence.service';
 import { AccessService } from './workspaces/access.service';
 import { WorkspacesResolver } from './workspaces/workspaces.resolver';
@@ -30,8 +36,8 @@ import { WorkspacesService } from './workspaces/workspaces.service';
     TypeOrmModule.forFeature(ENTITIES),
     JwtModule.registerAsync({ useFactory: () => ({ secret: appConfig().jwtSecret }) }),
   ],
-  providers: [AuthService, AccessService, EventsService],
-  exports: [TypeOrmModule, AuthService, AccessService, EventsService],
+  providers: [AuthService, AccessService, EventsService, ActivityService, MailerService],
+  exports: [TypeOrmModule, AuthService, AccessService, EventsService, ActivityService, MailerService],
 })
 class CoreModule {}
 
@@ -60,7 +66,7 @@ function formatError(error: GraphQLFormattedError): GraphQLFormattedError {
       driver: ApolloDriver,
       inject: [AuthService],
       useFactory: (auth: AuthService) => ({
-        autoSchemaFile: join(process.cwd(), 'schema.gql'),
+        autoSchemaFile: process.env.NODE_ENV === 'production' ? true : join(process.cwd(), 'schema.gql'),
         sortSchema: true,
         graphiql: process.env.NODE_ENV !== 'production',
         formatError,
@@ -90,6 +96,10 @@ function formatError(error: GraphQLFormattedError): GraphQLFormattedError {
     WorkspacesResolver,
     DocumentsService,
     DocumentsResolver,
+    SnapshotsResolver,
+    InvitationsService,
+    InvitationsResolver,
+    ActivityResolver,
     AuthResolver,
     PersistenceService,
     CollaborationService,
