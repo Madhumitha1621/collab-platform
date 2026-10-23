@@ -1,0 +1,11 @@
+**/node_modules
+**/dist
+**/.env
+**/.env.*
+!**/.env.example
+**/.pgdata
+**/*.tsbuildinfo
+.git
+test-results
+playwright-report
+docs/images
