@@ -1,7 +1,14 @@
 import { createClient, type Client } from 'graphql-ws';
 
-export const API_URL = import.meta.env.VITE_API_URL ?? 'http://localhost:4000/graphql';
-export const COLLAB_URL = import.meta.env.VITE_COLLAB_URL ?? 'ws://localhost:1234';
+/** Resolves absolute or same-origin relative URLs (e.g. "/graphql" behind a reverse proxy). */
+function resolveUrl(value: string, protocol: 'http' | 'ws'): string {
+  const url = new URL(value, window.location.href);
+  if (protocol === 'ws') url.protocol = url.protocol.replace(/^http/, 'ws');
+  return url.toString();
+}
+
+export const API_URL = resolveUrl(import.meta.env.VITE_API_URL ?? 'http://localhost:4000/graphql', 'http');
+export const COLLAB_URL = resolveUrl(import.meta.env.VITE_COLLAB_URL ?? 'ws://localhost:1234', 'ws');
 const WS_API_URL = API_URL.replace(/^http/, 'ws');
 
 const TOKEN_KEY = 'collab.token';
