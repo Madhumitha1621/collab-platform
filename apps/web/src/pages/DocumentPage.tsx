@@ -8,6 +8,7 @@ import { Link, useParams } from 'react-router-dom';
 import * as Y from 'yjs';
 import { COLLAB_URL, gql, subscribe, type DocumentMeta, type User } from '../api';
 import { useAuth } from '../auth';
+import { VersionsPanel } from '../components/VersionsPanel';
 
 const COLORS = ['#d9480f', '#2b8a3e', '#1971c2', '#9c36b5', '#c2255c', '#0c8599', '#e67700', '#5f3dc4'];
 
@@ -53,7 +54,10 @@ export function DocumentPage() {
       {meta.archivedAt ? (
         <p className="banner">This document is archived and can no longer be edited.</p>
       ) : (
-        <CollaborationSession documentId={documentId} user={user} token={token} />
+        <div className="doc-layout">
+          <CollaborationSession documentId={documentId} user={user} token={token} />
+          <VersionsPanel documentId={documentId} canEdit={meta.myRole !== 'VIEWER'} />
+        </div>
       )}
     </section>
   );
