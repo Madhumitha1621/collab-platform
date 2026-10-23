@@ -3,8 +3,11 @@ import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, Repository } from 'typeorm';
 import { assertUuid } from '../common/ids';
 import { Role } from '../common/roles';
+import { ActivityService } from '../activity/activity.service';
+import { appConfig } from '../config';
 import { EventsService } from '../events/events.service';
 import { WorkspaceEventType } from '../events/workspace-event.model';
+import { MailerService } from '../mail/mailer.service';
 import { User } from '../users/user.entity';
 import { AccessService } from './access.service';
 import { WorkspaceMember } from './workspace-member.entity';
@@ -19,6 +22,8 @@ export class WorkspacesService {
     @InjectRepository(User) private readonly users: Repository<User>,
     private readonly access: AccessService,
     private readonly events: EventsService,
+    private readonly activity: ActivityService,
+    private readonly mailer: MailerService,
   ) {}
 
   listForUser(userId: string): Promise<Workspace[]> {
@@ -46,7 +51,12 @@ export class WorkspacesService {
     const { workspace } = await this.access.requireWorkspace(userId, workspaceId, Role.OWNER);
     workspace.name = name.trim();
     const saved = await this.workspaces.save(workspace);
-    this.events.publishWorkspaceEvent({ type: WorkspaceEventType.WORKSPACE_UPDATED, workspaceId, actorId: userId });
+    await this.activity.record({
+      type: WorkspaceEventType.WORKSPACE_UPDATED,
+      workspaceId,
+      actorId: userId,
+      metadata: { detail: saved.name },
+    });
     return saved;
   }
 
@@ -55,16 +65,27 @@ export class WorkspacesService {
     return this.members.find({ where: { workspaceId }, order: { joinedAt: 'ASC' } });
   }
 
-  /** P0 adds existing users directly; email invitations for unknown addresses are a P1 feature. */
+  /** Adds an existing user directly and notifies them. Anyone else is invited via InvitationsService. */
   async addMember(actorId: string, workspaceId: string, email: string, role: Role): Promise<WorkspaceMember> {
-    await this.access.requireWorkspace(actorId, workspaceId, Role.OWNER);
+    const { workspace } = await this.access.requireWorkspace(actorId, workspaceId, Role.OWNER);
     const user = await this.users.findOne({ where: { email: email.trim().toLowerCase() } });
     if (!user) throw new NotFoundException('No registered user has that email address');
     if (await this.members.exist({ where: { workspaceId, userId: user.id } })) {
       throw new BadRequestException('User is already a member of this workspace');
     }
     await this.members.insert({ workspaceId, userId: user.id, role });
-    this.events.publishWorkspaceEvent({ type: WorkspaceEventType.MEMBER_ADDED, workspaceId, actorId, userId: user.id });
+    await this.activity.record({
+      type: WorkspaceEventType.MEMBER_ADDED,
+      workspaceId,
+      actorId,
+      userId: user.id,
+      metadata: { detail: role },
+    });
+    void this.mailer.send({
+      to: user.email,
+      subject: `You were added to ${workspace.name}`,
+      text: `You now have ${role.toLowerCase()} access to the workspace "${workspace.name}".\n\nOpen it: ${appConfig().webUrl}/w/${workspaceId}`,
+    });
     return this.members.findOneOrFail({ where: { workspaceId, userId: user.id } });
   }
 
@@ -72,7 +93,13 @@ export class WorkspacesService {
     const member = await this.requireManageableMember(actorId, workspaceId, userId);
     member.role = role;
     await this.members.update({ workspaceId, userId }, { role });
-    this.events.publishWorkspaceEvent({ type: WorkspaceEventType.MEMBER_ROLE_UPDATED, workspaceId, actorId, userId });
+    await this.activity.record({
+      type: WorkspaceEventType.MEMBER_ROLE_UPDATED,
+      workspaceId,
+      actorId,
+      userId,
+      metadata: { detail: role },
+    });
     // Live sessions must pick up the new role (e.g. an editor downgraded to viewer).
     this.events.emitAccess({ type: 'membership-changed', workspaceId, userId });
     return member;
@@ -81,7 +108,7 @@ export class WorkspacesService {
   async removeMember(actorId: string, workspaceId: string, userId: string): Promise<boolean> {
     await this.requireManageableMember(actorId, workspaceId, userId);
     await this.members.delete({ workspaceId, userId });
-    this.events.publishWorkspaceEvent({ type: WorkspaceEventType.MEMBER_REMOVED, workspaceId, actorId, userId });
+    await this.activity.record({ type: WorkspaceEventType.MEMBER_REMOVED, workspaceId, actorId, userId });
     this.events.emitAccess({ type: 'membership-changed', workspaceId, userId });
     return true;
   }
