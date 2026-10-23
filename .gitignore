@@ -5,3 +5,6 @@ coverage/
 *.log
 .pgdata/
 *.tsbuildinfo
+.env.prod
+test-results/
+playwright-report/
