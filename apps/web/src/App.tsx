@@ -1,8 +1,10 @@
 import type { ReactNode } from 'react';
 import { BrowserRouter, Link, Navigate, Route, Routes, useLocation } from 'react-router-dom';
 import { AuthProvider, useAuth } from './auth';
+import { SearchBox } from './components/SearchBox';
 import { AuthPage } from './pages/AuthPage';
 import { DocumentPage } from './pages/DocumentPage';
+import { InvitePage } from './pages/InvitePage';
 import { WorkspacePage } from './pages/WorkspacePage';
 import { WorkspacesPage } from './pages/WorkspacesPage';
 
@@ -22,6 +24,7 @@ function Shell({ children }: { children: ReactNode }) {
         <Link to="/" className="brand">
           Collab
         </Link>
+        {user && <SearchBox />}
         {user && (
           <div className="topbar-user">
             <span className="muted">{user.name}</span>
@@ -46,6 +49,7 @@ export function App() {
             <Route path="/register" element={<AuthPage mode="register" />} />
             <Route path="/" element={<RequireAuth><WorkspacesPage /></RequireAuth>} />
             <Route path="/w/:workspaceId" element={<RequireAuth><WorkspacePage /></RequireAuth>} />
+            <Route path="/invite/:token" element={<RequireAuth><InvitePage /></RequireAuth>} />
             <Route path="/d/:documentId" element={<RequireAuth><DocumentPage /></RequireAuth>} />
             <Route path="*" element={<Navigate to="/" replace />} />
           </Routes>

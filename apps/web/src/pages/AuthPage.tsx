@@ -58,11 +58,11 @@ export function AuthPage({ mode }: { mode: 'login' | 'register' }) {
       <p className="muted">
         {mode === 'login' ? (
           <>
-            No account? <Link to="/register">Register</Link>
+            No account? <Link to="/register" state={location.state}>Register</Link>
           </>
         ) : (
           <>
-            Already registered? <Link to="/login">Log in</Link>
+            Already registered? <Link to="/login" state={location.state}>Log in</Link>
           </>
         )}
       </p>
