@@ -77,3 +77,17 @@ export function listItems(editor: Locator): Promise<string[]> {
     }),
   );
 }
+
+/** Focuses the editor with the cursor at the end of the last list item's text. */
+export async function placeCursorAtEndOfLastListItem(editor: Locator) {
+  await editor.evaluate((dom) => {
+    // TipTap attaches its Editor instance to the root DOM node.
+    const tiptap = (dom as HTMLElement & { editor: any }).editor;
+    let end = -1;
+    tiptap.state.doc.descendants((node: any, pos: number) => {
+      // listItem > paragraph: the paragraph's text ends 2 positions before the item closes.
+      if (node.type.name === 'listItem') end = pos + node.nodeSize - 2;
+    });
+    tiptap.chain().focus().setTextSelection(end).run();
+  });
+}

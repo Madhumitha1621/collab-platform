@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 import { mkdirSync } from 'node:fs';
-import { listItems, openDocument, seedTeam, signedInPage } from './fixtures';
+import { listItems, openDocument, placeCursorAtEndOfLastListItem, seedTeam, signedInPage } from './fixtures';
 
 const SCREENSHOTS = process.env.SCREENSHOTS === '1';
 if (SCREENSHOTS) mkdirSync('docs/images', { recursive: true });
@@ -28,18 +28,11 @@ test('two people edit the same document live, with formatting, cursors and prese
   await expect(benEditor.locator('h1')).toContainText('Launch plan');
   await expect.poll(() => listItems(benEditor)).toEqual(['Ship real-time editing']);
 
-  // Ben adds to the same list while Ada is still in it.
-  // Ada's caret widget must not sit in the line Ben's keystrokes navigate. She moves to the heading;
-  // in headless Linux Chrome her editor may instead blur (only one page has focus), which hides it.
-  await ada.keyboard.press('Control+Home');
+  // Ben adds to the same list while Ada is still in it. His cursor is placed at the end of the list
+  // item through the editor API: mouse clicks and Home/End behave differently per platform and can
+  // land on a remote caret widget. Everything typed afterwards is real keyboard input.
   await ben.bringToFront();
-  await expect(benEditor.locator('ul .collaboration-carets__label')).toHaveCount(0);
-  // Keyboard, not a mouse click: a click can land on a caret label and misplace the cursor.
-  // Ctrl+End reaches the editor's trailing empty paragraph; ArrowUp + End moves to the end of the list item.
-  await benEditor.focus();
-  await ben.keyboard.press('Control+End');
-  await ben.keyboard.press('ArrowUp');
-  await ben.keyboard.press('End');
+  await placeCursorAtEndOfLastListItem(benEditor);
   await ben.keyboard.press('Enter');
   await ben.getByRole('button', { name: 'B', exact: true }).click();
   await ben.keyboard.type('Zero lost edits');
