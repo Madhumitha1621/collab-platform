@@ -2,12 +2,20 @@ import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { gql, subscribe, type DocumentMeta, type Member, type Role, type Workspace } from '../api';
 import { useAuth } from '../auth';
+import { ActivityFeed } from '../components/ActivityFeed';
 
 interface WorkspaceDetail extends Workspace {
   members: Member[];
 }
 
 const ROLES: Role[] = ['OWNER', 'EDITOR', 'VIEWER'];
+
+interface PendingInvitation {
+  id: string;
+  email: string;
+  role: Role;
+  expiresAt: string;
+}
 
 export function WorkspacePage() {
   const { workspaceId = '' } = useParams();
@@ -18,6 +26,9 @@ export function WorkspacePage() {
   const [title, setTitle] = useState('');
   const [inviteEmail, setInviteEmail] = useState('');
   const [inviteRole, setInviteRole] = useState<Role>('EDITOR');
+  const [invitations, setInvitations] = useState<PendingInvitation[]>([]);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [activityVersion, setActivityVersion] = useState(0);
 
   const load = useCallback(async () => {
     try {
@@ -31,6 +42,13 @@ export function WorkspacePage() {
       setWorkspace(data.workspace);
       setDocuments(data.documents);
       setError(null);
+      if (data.workspace.myRole === 'OWNER') {
+        const pending = await gql<{ workspaceInvitations: PendingInvitation[] }>(
+          `query($id: ID!) { workspaceInvitations(workspaceId: $id) { id email role expiresAt } }`,
+          { id: workspaceId },
+        );
+        setInvitations(pending.workspaceInvitations);
+      }
     } catch (err) {
       setError((err as Error).message);
       setWorkspace(null);
@@ -43,7 +61,10 @@ export function WorkspacePage() {
     return subscribe(
       `subscription($id: ID!) { workspaceActivity(workspaceId: $id) { type } }`,
       { id: workspaceId },
-      () => void load(),
+      () => {
+        void load();
+        setActivityVersion((v) => v + 1);
+      },
     );
   }, [workspaceId, load]);
 
@@ -52,6 +73,7 @@ export function WorkspacePage() {
     try {
       await action();
       await load();
+      setActivityVersion((v) => v + 1);
     } catch (err) {
       setError((err as Error).message);
     }
@@ -185,15 +207,16 @@ export function WorkspacePage() {
             onSubmit={(e: FormEvent) => {
               e.preventDefault();
               void run(async () => {
-                await gql(`mutation($input: InviteWorkspaceMemberInput!) { inviteWorkspaceMember(input: $input) { userId } }`, {
+                await gql(`mutation($input: SendWorkspaceInvitationInput!) { sendWorkspaceInvitation(input: $input) { id } }`, {
                   input: { workspaceId, email: inviteEmail, role: inviteRole },
                 });
+                setNotice(`Invitation sent to ${inviteEmail}`);
                 setInviteEmail('');
               });
             }}
           >
             <label>
-              Add member by email
+              Invite by email
               <input type="email" value={inviteEmail} onChange={(e) => setInviteEmail(e.target.value)} required />
             </label>
             <div className="inline-form">
@@ -202,12 +225,40 @@ export function WorkspacePage() {
                 <option value="VIEWER">viewer</option>
                 <option value="OWNER">owner</option>
               </select>
-              <button type="submit">Add</button>
+              <button type="submit">Send invite</button>
             </div>
-            <p className="muted small">The person must already have an account.</p>
+            {notice && <p className="success small">{notice}</p>}
           </form>
         )}
+        {isOwner && invitations.length > 0 && (
+          <>
+            <h3>Pending invitations</h3>
+            <ul className="members">
+              {invitations.map((inv) => (
+                <li key={inv.id}>
+                  <div>
+                    {inv.email}
+                    <div className="muted small">
+                      {inv.role.toLowerCase()} · expires {new Date(inv.expiresAt).toLocaleDateString()}
+                    </div>
+                  </div>
+                  <button
+                    className="ghost danger"
+                    onClick={() =>
+                      void run(() => gql(`mutation($id: ID!) { revokeWorkspaceInvitation(id: $id) }`, { id: inv.id }))
+                    }
+                  >
+                    Revoke
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
       </aside>
+      <div className="workspace-activity">
+        <ActivityFeed workspaceId={workspaceId} version={activityVersion} />
+      </div>
     </div>
   );
 }
