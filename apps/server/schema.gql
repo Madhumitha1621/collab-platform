@@ -1,0 +1,168 @@
+# ------------------------------------------------------
+# THIS FILE WAS AUTOMATICALLY GENERATED (DO NOT MODIFY)
+# ------------------------------------------------------
+
+type AuthPayload {
+  token: String!
+  user: User!
+}
+
+input CreateDocumentInput {
+  title: String!
+  workspaceId: ID!
+}
+
+input CreateDocumentSnapshotInput {
+  documentId: ID!
+  label: String
+}
+
+input CreateWorkspaceInput {
+  name: String!
+}
+
+"""
+A date-time string at UTC, such as 2019-12-03T09:54:33Z, compliant with the date-time format.
+"""
+scalar DateTime
+
+type Document {
+  archivedAt: DateTime
+  createdAt: DateTime!
+  createdBy: ID!
+  id: ID!
+  myRole: Role!
+  title: String!
+  updatedAt: DateTime!
+  workspaceId: ID!
+}
+
+type DocumentSnapshot {
+  createdAt: DateTime!
+  createdBy: ID
+  documentId: ID!
+  id: ID!
+  label: String
+}
+
+input InviteWorkspaceMemberInput {
+  email: String!
+  role: Role!
+  workspaceId: ID!
+}
+
+input LoginInput {
+  email: String!
+  password: String!
+}
+
+type Me {
+  email: String!
+  id: String!
+  name: String!
+}
+
+type Mutation {
+  archiveDocument(id: ID!): Document!
+  createDocument(input: CreateDocumentInput!): Document!
+  createDocumentSnapshot(input: CreateDocumentSnapshotInput!): DocumentSnapshot!
+  createWorkspace(input: CreateWorkspaceInput!): Workspace!
+  inviteWorkspaceMember(input: InviteWorkspaceMemberInput!): WorkspaceMember!
+  login(input: LoginInput!): AuthPayload!
+  logout: Boolean!
+  register(input: RegisterInput!): AuthPayload!
+  removeWorkspaceMember(input: RemoveWorkspaceMemberInput!): Boolean!
+  renameDocument(input: RenameDocumentInput!): Document!
+  updateMemberRole(input: UpdateMemberRoleInput!): WorkspaceMember!
+  updateWorkspace(input: UpdateWorkspaceInput!): Workspace!
+}
+
+type Query {
+  document(id: ID!): Document!
+  documents(includeArchived: Boolean! = false, workspaceId: ID!): [Document!]!
+  me: Me!
+  myWorkspaces: [Workspace!]!
+  workspace(id: ID!): Workspace!
+}
+
+input RegisterInput {
+  email: String!
+  name: String!
+  password: String!
+}
+
+input RemoveWorkspaceMemberInput {
+  userId: ID!
+  workspaceId: ID!
+}
+
+input RenameDocumentInput {
+  id: ID!
+  title: String!
+}
+
+enum Role {
+  EDITOR
+  OWNER
+  VIEWER
+}
+
+type Subscription {
+  documentMetadataChanged(documentId: ID!): Document!
+  workspaceActivity(workspaceId: ID!): WorkspaceEvent!
+}
+
+input UpdateMemberRoleInput {
+  role: Role!
+  userId: ID!
+  workspaceId: ID!
+}
+
+input UpdateWorkspaceInput {
+  id: ID!
+  name: String!
+}
+
+type User {
+  createdAt: DateTime!
+  email: String!
+  id: ID!
+  name: String!
+}
+
+type Workspace {
+  createdAt: DateTime!
+  id: ID!
+  members: [WorkspaceMember!]!
+  myRole: Role!
+  name: String!
+  ownerId: ID!
+  updatedAt: DateTime!
+}
+
+type WorkspaceEvent {
+  actorId: ID!
+  documentId: ID
+  occurredAt: DateTime!
+  type: WorkspaceEventType!
+  userId: ID
+  workspaceId: ID!
+}
+
+enum WorkspaceEventType {
+  DOCUMENT_ARCHIVED
+  DOCUMENT_CREATED
+  DOCUMENT_RENAMED
+  MEMBER_ADDED
+  MEMBER_REMOVED
+  MEMBER_ROLE_UPDATED
+  WORKSPACE_UPDATED
+}
+
+type WorkspaceMember {
+  joinedAt: DateTime!
+  role: Role!
+  user: User!
+  userId: ID!
+  workspaceId: ID!
+}
