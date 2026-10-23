@@ -9,6 +9,7 @@ work survives disconnects and server restarts.
 | API | NestJS 11, GraphQL (Apollo, code-first), TypeORM + migrations, JWT + server-side sessions |
 | Collaboration | Yjs, Hocuspocus 3 (standard y-protocols sync + awareness) embedded in the Nest process |
 | Storage | PostgreSQL 16: binary update log (`BYTEA`) + compacted snapshots |
+| Scale-out (optional) | Redis: `@hocuspocus/extension-redis`, `graphql-redis-subscriptions`, access-event channel |
 | Web | React 19, Vite, TipTap 3 (Collaboration + CollaborationCaret) |
 
 See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the provider decision, persistence and
@@ -45,6 +46,23 @@ cp apps/server/.env.example apps/server/.env
 npm run dev:server
 ```
 
+### Running several instances (optional)
+
+Set `REDIS_URL` and every instance shares document updates, awareness (cursors and presence),
+GraphQL subscription events and session revocations. Clients can then connect to any instance.
+Without `REDIS_URL` the server runs as a single instance, exactly as before. Start Redis with
+Docker:
+
+```bash
+npm run redis:up
+```
+
+or run any Redis 5+ on `localhost:6379`. Then set `REDIS_URL=redis://localhost:6379` in
+`apps/server/.env`. To try two instances on one machine, start a second server with different
+`PORT` and `COLLAB_PORT` values.
+
+### Web app
+
 In another terminal, start the web app (http://localhost:5173):
 
 ```bash
@@ -73,6 +91,8 @@ The full GraphQL schema is generated to `apps/server/schema.gql` on boot.
 ## Tests
 
 The tests run against the `collab_test` database, which both the Docker and the embedded setup create.
+`multi-instance.spec.ts` also needs Redis at `TEST_REDIS_URL` (default `redis://localhost:6379`), and
+fails if it can't reach it.
 
 ```bash
 npm test
@@ -82,6 +102,7 @@ npm test
 |---|---|
 | `graphql.spec.ts` | Register/login/logout (token revoked), invalid tokens, validation, workspace isolation, role enforcement, archive, owner protection |
 | `collaboration.spec.ts` | Concurrent same-paragraph edits converge; unauthenticated/forbidden/invalid joins rejected; **viewer writes rejected at protocol level and never persisted**; save acknowledgement; disconnect/offline edits/reconnect; duplicate + out-of-order updates; live revocation on member removal, role downgrade, logout and archive; **restart recovery** |
+| `multi-instance.spec.ts` | Two app instances on one PostgreSQL + Redis: **edits from clients on different instances converge**, presence crosses instances, late joiners and stored state match, **removing a member (on A) closes their session on B**, logout ends sessions everywhere, subscription events cross instances |
 | `persistence.spec.ts` | Snapshot + log reconstruction, threshold compaction preserves content, labelled snapshots kept, **DB outage keeps updates queued, reports error, then recovers** |
 
 ## Configuration (`apps/server/.env`)
@@ -91,6 +112,8 @@ npm test
 | `DATABASE_URL` | — | PostgreSQL connection string |
 | `JWT_SECRET` | — | Signing secret (required) |
 | `JWT_EXPIRES_IN_SECONDS` | 86400 | Session lifetime |
+| `REDIS_URL` | — | Enables cross-instance fan-out. Unset = single instance |
+| `REDIS_PREFIX` | `collab` | Namespace for Redis channels and keys |
 | `CORS_ORIGIN` | `http://localhost:5173` | Comma-separated allowed origins |
 | `COLLAB_PORT` | 1234 | Hocuspocus port |
 | `COLLAB_MAX_MESSAGE_BYTES` | 1048576 | Max collaboration message size |
@@ -111,6 +134,7 @@ authorization, including live revocation; input validation; message size and rat
 structured GraphQL errors; health and metrics; automated tests. Also done: `createDocumentSnapshot`
 (named restore points), and GraphQL subscriptions for application events.
 
+**Done (P1):** cross-instance collaboration through Redis (see ARCHITECTURE.md).
+
 **Not yet (P1):** email invitations (P0 adds *existing* users by email), title search, snapshot
-restore UI, activity history table, Redis cross-instance fan-out (see the scaling path in
-ARCHITECTURE.md), load tests, production deployment, frontend automated tests.
+restore UI, activity history table, load tests (including reconnect bursts across instances), production deployment, frontend automated tests.

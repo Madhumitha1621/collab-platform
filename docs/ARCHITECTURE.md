@@ -18,6 +18,11 @@
                         ▼
                    PostgreSQL (users, sessions, workspaces, workspace_members,
                                documents, document_updates, document_snapshots)
+
+ Optional, when REDIS_URL is set: every instance also connects to Redis
+   ├─ @hocuspocus/extension-redis  ── Yjs updates, awareness, stateless messages (per document)
+   ├─ RedisPubSub (EventsService)  ── GraphQL subscription events
+   └─ <prefix>:access channel      ── AccessEvents (revocation)
 ```
 
 ## Decision: Yjs provider (PRD §6.3)
@@ -68,7 +73,7 @@ then shows "Save failing — retrying". The next tick retries.
   ≤ `PERSIST_FLUSH_MS`, longer only while the database is failing). Clients never see those edits
   acknowledged. Connected clients still hold them, and the Yjs sync handshake re-sends them on
   reconnect, so in practice they are only lost if every client that had them is gone too.
-- Redis is not part of the durability path.
+- Redis is not part of the durability path. Losing Redis stops cross-instance fan-out, not saving.
 
 **Read path.** The latest snapshot plus every update with `id > snapshot.last_applied_update_id`,
 read in one `REPEATABLE READ` transaction so a concurrent compaction cannot hide rows.
@@ -92,12 +97,42 @@ including duplicate rows in `document_updates`, converges to the same state. Thi
   authenticates again, so the user gets the new role (read-only) or is rejected (`forbidden`).
 - GraphQL subscription filters check membership again for each event.
 
-## Scaling path (P1)
+## Multiple instances through Redis (P1)
 
-The system currently runs as a single instance (PRD §9.5). To scale out:
-1. Add `@hocuspocus/extension-redis` so document updates and awareness reach every instance.
-2. Replace the in-memory `PubSub` in `EventsService` with a Redis-backed PubSub. The internal
-   `access$` subject also has to cross instances.
-3. Compaction is already safe across instances (advisory lock). Insert batching is per instance, which
-   is fine because updates are idempotent.
-4. Load-test reconnect bursts and queue saturation before enabling it.
+Setting `REDIS_URL` turns on cross-instance fan-out. Without it, nothing connects to Redis and the
+server behaves as a single instance (PRD §9.5). All channels and keys use `REDIS_PREFIX`
+(default `collab`), so several environments can share one Redis.
+
+**Documents.** `CollaborationService` adds `@hocuspocus/extension-redis` (keys under
+`<prefix>:yjs`). Each instance that has a document loaded subscribes to that document's channel and
+relays sync messages, awareness and stateless messages to the others. A client on instance A and a
+client on instance B therefore edit the same Yjs document, see each other's cursors, and get the
+same save acknowledgements.
+
+**Persistence with several instances.** Each instance still loads from PostgreSQL and writes its own
+queue. Updates relayed from other instances also go into that queue. As a result, a `saved`
+acknowledgement from any instance only covers updates that instance has written itself, so the
+guarantee above still holds when acknowledgements cross instances. The cost is duplicate rows: up to
+one per instance that has the document loaded. Yjs updates are idempotent, and compaction (under a
+per-document advisory lock) folds the duplicates into the next snapshot. The Redis extension's
+`onStoreDocument` takes a Redis lock and stops the hook chain on instances that don't hold it.
+For that reason the application extension has a higher priority (1001 vs 1000), so its flush always
+runs first. Hocuspocus then logs `Could not acquire lock…` on those instances. That message is
+expected and harmless.
+
+**Subscriptions.** `EventsService.pubSub` becomes a `RedisPubSub`. Payloads are JSON, and the Date
+fields (`occurredAt`, `createdAt`, `updatedAt`, `archivedAt`) are revived on receipt. Subscription
+filters still check membership again for each event on the receiving instance.
+
+**Revocation.** `emitAccess` delivers the event to the local `access$` right away, then publishes it
+on `<prefix>:access` with the instance's id. The other instances push it into their own `access$`
+(skipping their own messages), and each closes its matching sockets with `4401`. Because local
+delivery doesn't depend on Redis, revocation on the instance that handled the mutation still works
+during a Redis outage. Remote instances miss the event while Redis is down. Those sessions are
+still checked again on their next reconnect, and the subscriber reconnects automatically.
+
+**Health.** `/health` reports `redis: up | down | disabled`. `down` returns 503, so a load balancer
+takes the instance out of rotation.
+
+**Still to do before production scale-out:** load-test reconnect bursts and queue saturation across
+instances, and use sticky sessions or connection draining when deploying.
