@@ -1,0 +1,68 @@
+# Production-style stack: PostgreSQL, Redis, API/collaboration server and the web app behind nginx.
+#   cp .env.prod.example .env.prod   # then set real secrets
+#   docker compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
+# The app is served on http://localhost:${WEB_PORT:-8080}. Put a TLS-terminating proxy in front
+# for HTTPS/WSS (see docs/DEPLOYMENT.md).
+name: collab-prod
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-collab}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env.prod}
+      POSTGRES_DB: ${POSTGRES_DB:-collab}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-collab}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Fan-out only; PostgreSQL is the durable store, so Redis keeps nothing on disk.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  server:
+    build:
+      context: .
+      dockerfile: apps/server/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: postgres://${POSTGRES_USER:-collab}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-collab}
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env.prod}
+      CORS_ORIGIN: ${PUBLIC_URL:-http://localhost:8080}
+      WEB_URL: ${PUBLIC_URL:-http://localhost:8080}
+      SMTP_URL: ${SMTP_URL:-}
+      MAIL_FROM: ${MAIL_FROM:-Collab <no-reply@collab.local>}
+    # Scale out with: docker compose ... up -d --scale server=2 (Redis keeps instances in sync).
+
+  web:
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8080}:80"
+
+volumes:
+  pgdata:
