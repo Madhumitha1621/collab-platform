@@ -1,5 +1,7 @@
 import { Injectable, Logger, OnApplicationBootstrap, OnApplicationShutdown } from '@nestjs/common';
+import { Redis as RedisExtension } from '@hocuspocus/extension-redis';
 import { Connection, Extension, Server } from '@hocuspocus/server';
+import IORedis from 'ioredis';
 import { Subscription } from 'rxjs';
 import * as Y from 'yjs';
 import { AuthService } from '../auth/auth.service';
@@ -40,6 +42,8 @@ class CollabError extends Error {
 export class CollaborationService implements OnApplicationBootstrap, OnApplicationShutdown {
   private readonly logger = new Logger(CollaborationService.name);
   private readonly config = appConfig().collab;
+  private readonly redisUrl = appConfig().redisUrl;
+  private readonly redisPrefix = appConfig().redisPrefix;
   private server?: Server;
   private accessSubscription?: Subscription;
   private readonly messageWindows = new WeakMap<Connection, { windowStart: number; count: number }>();
@@ -79,7 +83,7 @@ export class CollaborationService implements OnApplicationBootstrap, OnApplicati
         // Safety net: the persistence service already flushes every PERSIST_FLUSH_MS.
         debounce: 2_000,
         maxDebounce: 10_000,
-        extensions: [this.extension()],
+        extensions: this.extensions(),
       },
       { maxPayload: this.config.maxMessageBytes },
     );
@@ -101,8 +105,24 @@ export class CollaborationService implements OnApplicationBootstrap, OnApplicati
     return this.server?.hocuspocus.getConnectionsCount() ?? 0;
   }
 
+  private extensions(): Extension[] {
+    const extensions = [this.extension()];
+    if (this.redisUrl) {
+      const url = this.redisUrl;
+      // Relays document updates, awareness and stateless messages (save acknowledgements)
+      // between instances that have the same document loaded.
+      extensions.push(new RedisExtension({ createClient: () => new IORedis(url), prefix: `${this.redisPrefix}:yjs` }));
+    }
+    return extensions;
+  }
+
   private extension(): Extension {
     return {
+      // Runs before the Redis extension (priority 1000). Its onStoreDocument takes a cross-instance
+      // lock and stops the hook chain if another instance holds it; every instance must still flush
+      // its own queue, so this extension's hooks go first.
+      priority: 1001,
+
       onAuthenticate: async ({ token, documentName, connectionConfig, socketId }) => {
         if (!isUuid(documentName)) {
           this.stats.rejectedConnections++;
@@ -158,6 +178,10 @@ export class CollaborationService implements OnApplicationBootstrap, OnApplicati
       },
 
       onChange: async ({ documentName, update }) => {
+        // Also called for updates relayed from other instances through Redis. Persisting them here
+        // too keeps the save acknowledgement exact: its state vector only covers updates that this
+        // instance has written. The duplicate rows are harmless (updates are idempotent) and
+        // compaction removes them.
         this.persistence.enqueue(documentName, update);
       },
 
