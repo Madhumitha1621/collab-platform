@@ -20,6 +20,8 @@ export default defineConfig({
   expect: { timeout: 10_000 },
   fullyParallel: false,
   workers: 1,
+  // One retry on CI; a test that passes only on retry is reported as flaky, not hidden.
+  retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['list']] : 'list',
   use: {
     baseURL: E2E.web,
