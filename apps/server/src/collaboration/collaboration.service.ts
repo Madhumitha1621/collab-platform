@@ -24,6 +24,9 @@ export interface CollabContext {
 /** Close code sent when the server ends a session because access changed; the client re-authenticates. */
 export const ACCESS_CHANGED_CLOSE_CODE = 4401;
 
+/** Name of the Y.XmlFragment that TipTap's Collaboration extension edits. */
+export const EDITOR_FIELD = 'default';
+
 class CollabError extends Error {
   constructor(readonly reason: string) {
     super(reason);
@@ -103,6 +106,39 @@ export class CollaborationService implements OnApplicationBootstrap, OnApplicati
 
   get connectionsCount(): number {
     return this.server?.hocuspocus.getConnectionsCount() ?? 0;
+  }
+
+  /**
+   * Replaces the live content of a document with the content encoded in `state` (a snapshot).
+   * The change is made as a normal Yjs edit through a direct connection, so connected editors
+   * see it immediately, it merges with concurrent edits, and it is persisted like any other edit.
+   * Supports the editor's XML fragment and plain Y.Text fields.
+   */
+  async replaceContent(documentId: string, state: Uint8Array): Promise<void> {
+    if (!this.server) throw new Error('Collaboration server is not running');
+    const source = new Y.Doc();
+    Y.applyUpdate(source, state);
+    const connection = await this.server.hocuspocus.openDirectConnection(documentId, { restore: true });
+    try {
+      await connection.transact((target) => {
+        const fields = new Set([...source.share.keys(), ...target.share.keys()]);
+        for (const field of fields) {
+          const existing = target.share.get(field);
+          if (field === EDITOR_FIELD || existing instanceof Y.XmlFragment) {
+            const into = target.getXmlFragment(field);
+            const from = source.getXmlFragment(field);
+            into.delete(0, into.length);
+            into.insert(0, from.toArray().map((node) => (node as Y.XmlElement | Y.XmlText).clone()));
+          } else {
+            const into = target.getText(field);
+            into.delete(0, into.length);
+            into.applyDelta(source.getText(field).toDelta());
+          }
+        }
+      });
+    } finally {
+      await connection.disconnect();
+    }
   }
 
   private extensions(): Extension[] {
